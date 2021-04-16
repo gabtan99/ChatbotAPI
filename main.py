@@ -54,15 +54,12 @@ except(Exception, psycopg2.Error) as error:
     print("Error connecting to PostgreSQL database", error)
     conn = None
 
-try:
-    cursor.execute("SELECT * FROM models")
-    all_models = cursor.fetchall()
-
-except(Exception, psycopg2.Error) as error:
-    print(error)
+cursor.execute("SELECT * FROM model")
+all_models = cursor.fetchall()
 
 for i in all_models:
-    if i[2] is None:
+
+    if i[2] is '':
         tokenizer = AutoTokenizer.from_pretrained(i[3])
         model = AutoModelForCausalLM.from_pretrained(i[4])
 
