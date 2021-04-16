@@ -1,3 +1,0 @@
-runtime: python37
-entrypoint: uvicorn --port 8080 main:app
-instance_class: F4_1G

@@ -99,12 +99,14 @@ def generate():
     token = request.args.get('token')
     model_id = request.args.get('model_id')
 
+    if query is None or model_id is None:
+        return {"error": "query or model_id parameter missing"}
+
     model_set = MODEL_LIST.get(int(model_id))    
 
     if model_set is None:
         return {"error": "Model does not exist"}
 
-    print(history_list)
     # First time messaging
     if token not in history_list:
         return generate_response(model_set["tokenizer"], model_set["model"], 0, None, query, None)
