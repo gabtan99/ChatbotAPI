@@ -4,6 +4,3 @@ deploy: # (Required) Precisely one of 'buildpack', 'docker', 'skaffold' must be 
     builder: heroku/buildpacks:18 # Builder image. Defaults to 'heroku/buildpacks:18'.
     service: service # Service name, so ingress can connect. Defaults to 'service'
     port: 8080 # Port number to configure in the Service. Defaults to '8080'.                        # Name of a profile to use.
-ingress: # Ingress configures https endpoints.
-  - service: # Name of a Service to connect. Defaults to 'service'
-    port:
