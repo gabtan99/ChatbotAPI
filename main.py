@@ -1,30 +1,17 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask
+from flask import request
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datetime import datetime
 from dotenv import load_dotenv
+from torch import cat
 
 import threading
 import psycopg2
 import os
 
-from torch import cat
-app = FastAPI()
+app = Flask(__name__)
 
 load_dotenv() 
-
-origins = [
-    "http://localhost",
-    "http://localhost:8080",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # History 
 history_list = {}
@@ -59,7 +46,7 @@ all_models = cursor.fetchall()
 
 for i in all_models:
 
-    if i[2] is '':
+    if i[2] == '':
         tokenizer = AutoTokenizer.from_pretrained(i[3])
         model = AutoModelForCausalLM.from_pretrained(i[4])
 
@@ -105,10 +92,14 @@ def generate_response(tokenizer, model, chat_round, chat_history_ids, query, tok
         return {"response": reply, "chat_round": chat_round + 1}
     ####
 
-@app.get("/generate")
-async def generate(query:str, token:str, model_id:int):
+@app.route("/generate")
+def generate():
 
-    model_set = MODEL_LIST.get(model_id)
+    query = request.args.get('query')
+    token = request.args.get('token')
+    model_id = request.args.get('model_id')
+
+    model_set = MODEL_LIST.get(int(model_id))    
 
     if model_set is None:
         return {"error": "Model does not exist"}
@@ -122,8 +113,8 @@ async def generate(query:str, token:str, model_id:int):
         return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["chat_history_id"], query, token)
 
 
-@app.get("/get_models")
-async def get_models():
+@app.route("/get_models")
+def get_models():
 
     lis = {}
     for key in MODEL_LIST.keys():
@@ -132,9 +123,14 @@ async def get_models():
     return {"models": lis}
 
     
-@app.post("/submit_rating")
-async def submit_rating(conversation:str, rating:float, model_id:int, token:str):
+@app.route("/submit_rating", methods = ["POST"])
+def submit_rating():
     
+    conversation = request.args.get('conversation')
+    rating = request.args.get('rating')
+    model_id = request.args.get('model_id')
+    token = request.args.get('token')
+
     try:
         kill_token(token)
         print("- SUBMITTING RATING -")
@@ -147,8 +143,11 @@ async def submit_rating(conversation:str, rating:float, model_id:int, token:str)
         return {"error": "Could not add to DB"}
 
 
-@app.get("/get_ratings")
-async def get_ratings(model_id: str):
+@app.route("/get_ratings")
+def get_ratings():
+
+    model_id = request.args.get('model_id')
+
     try:
         cursor.execute("SELECT * FROM model_ratings WHERE model_used = " + model_id)
         all_ratings = cursor.fetchall()
@@ -162,3 +161,6 @@ async def get_ratings(model_id: str):
     except(Exception, psycopg2.Error) as error:
         print(error)
         return {"error": "Model does not exist"}
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
