@@ -1,5 +1,7 @@
-from flask import Flask
-from flask import request
+from flask import Flask, request
+from flask_cors import CORS
+from flask_sslify import SSLify
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datetime import datetime
 from dotenv import load_dotenv
@@ -10,14 +12,14 @@ import psycopg2
 import os
 
 app = Flask(__name__)
+CORS(app, supports_credentials=True)
+sslify = SSLify(app)
 
 load_dotenv() 
 
-# History 
 history_list = {}
 MODEL_LIST = {}
 
-# Create a connection credentials to the PostgreSQL database
 try:
     conn = psycopg2.connect(
         host=os.getenv('host'),
@@ -27,16 +29,13 @@ try:
         password=os.getenv('pass')
     )
 
-    # Create a cursor connection object to a PostgreSQL instance and print the connection properties.
     cursor = conn.cursor()
     print(conn.get_dsn_parameters(),"\n")
 
-    # Display the PostgreSQL version installed
     cursor.execute("SELECT version();")
     record = cursor.fetchone()
     print("You are connected into the - ", record, "\n")
 
-# Handle the error throws by the command that is useful when using Python while working with PostgreSQL
 except(Exception, psycopg2.Error) as error:
     print("Error connecting to PostgreSQL database", error)
     conn = None
@@ -92,7 +91,7 @@ def generate_response(tokenizer, model, chat_round, chat_history_ids, query, tok
         return {"response": reply, "chat_round": chat_round + 1}
     ####
 
-@app.route("/generate")
+@app.route("/generate", methods=["GET"])
 def generate():
 
     query = request.args.get('query')
@@ -115,7 +114,7 @@ def generate():
         return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["chat_history_id"], query, token)
 
 
-@app.route("/get_models")
+@app.route("/get_models", methods=["GET"])
 def get_models():
 
     lis = {}
@@ -133,8 +132,13 @@ def submit_rating():
     model_id = request.args.get('model_id')
     token = request.args.get('token')
 
-    try:
+    if conversation is None or rating is None or model_id is None:
+        return {"error": "model_id, rating, and conversation parameter is required"}
+    
+    if token is not None:
         kill_token(token)
+
+    try:
         print("- SUBMITTING RATING -")
         cursor.execute("INSERT INTO model_ratings (conversation, rating, model_used) VALUES (%s, %s, %s)", (conversation, rating, model_id))
         conn.commit()
@@ -145,10 +149,13 @@ def submit_rating():
         return {"error": "Could not add to DB"}
 
 
-@app.route("/get_ratings")
+@app.route("/get_ratings", methods=["GET"])
 def get_ratings():
 
     model_id = request.args.get('model_id')
+
+    if model_id is None or model_id == "":
+        return {"error": "model_id parameter is required"}
 
     try:
         cursor.execute("SELECT * FROM model_ratings WHERE model_used = " + model_id)
