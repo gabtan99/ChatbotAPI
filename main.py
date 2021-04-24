@@ -1,11 +1,13 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sslify import SSLify
 
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from datetime import datetime
+from collections import deque
 from dotenv import load_dotenv
-from torch import cat
+from torch import torch
 
 import threading
 import psycopg2
@@ -60,36 +62,40 @@ def kill_token(token):
         print("Key does not exist anymore")
 
 
-def generate_response(tokenizer, model, chat_round, chat_history_ids, query, token):
+def generate_response(tokenizer, model, chat_round, context, query, token):
     
-    # Encode user input and End-of-String (EOS) token
     new_input_ids = tokenizer.encode(query + tokenizer.eos_token, return_tensors='pt')
 
-    # Append tokens to chat history
-    bot_input_ids = cat([chat_history_ids, new_input_ids], dim=-1) if chat_round > 0 else new_input_ids
+    if token is None: # first time messaging
+        print("- REGISTERING TOKEN -")
+        q = deque(maxlen=3) 
 
-    # Generate response given maximum chat length history of 1250 tokens
-    chat_history_ids = model.generate(bot_input_ids, max_length=1250, pad_token_id=tokenizer.eos_token_id)
+        token = str(datetime.now().strftime("%Y%m%d%H%M%S"))
+        threading.Timer(300.0, kill_token, [token]).start() # This will clear the memory for token
+    else: # reuse previous n lines of context
+        print("- ACCESSING TOKEN -")
+        q = context
+
+        chat_history_ids = torch.cat([line for line in q], dim=-1)
+
+    q.append(new_input_ids) # add user input to q
+
+    bot_input_ids = torch.cat([chat_history_ids, new_input_ids], dim=-1) if chat_round > 0 else new_input_ids
+    
+    chat_history_ids = model.generate(bot_input_ids, max_length=1250, pad_token_id=tokenizer.eos_token_id, do_sample=True, top_k=0, temperature=0.7)
+
+    bot_output_ids = chat_history_ids[:, bot_input_ids.shape[-1]:]
+
+    q.append(bot_output_ids) # add bot reply to q
 
     reply = tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)    
 
-    #### for remembering the context
-    if token is None:
-        token = str(datetime.now().strftime("%Y%m%d%H%M%S"))
-        print("- REGISTERING TOKEN -")
-        threading.Timer(300.0, kill_token, [token]).start()
-        history_list[token] = ({"chat_history_id": chat_history_ids,
-                            "chat_round": chat_round + 1})
+    history_list[token] = ({"context": q, "chat_round": chat_round + 1}) # store in memory to remember context
 
-        return {"response": reply, "token": token}
-
-    else:
-        print("- ACCESSING TOKEN -")
-        history_list[token] = ({"chat_history_id": chat_history_ids,
-                            "chat_round": chat_round + 1})
-
+    if chat_round > 0:    
         return {"response": reply, "chat_round": chat_round + 1}
-    ####
+    else:
+        return {"response": reply, "token": token}
 
 @app.route("/generate", methods=["GET"])
 def generate():
@@ -111,7 +117,7 @@ def generate():
         return generate_response(model_set["tokenizer"], model_set["model"], 0, None, query, None)
     else:
         history = history_list.get(token)
-        return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["chat_history_id"], query, token)
+        return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["context"], query, token)
 
 
 @app.route("/get_models", methods=["GET"])
