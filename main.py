@@ -47,9 +47,10 @@ all_models = cursor.fetchall()
 
 for i in all_models:
 
-    if i[2] == '':
+    if i[2] == '' or i[2] is None:
         tokenizer = AutoTokenizer.from_pretrained(i[3])
         model = AutoModelForCausalLM.from_pretrained(i[4])
+        print(i)
 
     MODEL_LIST[i[0]] = {"name": i[1], "tokenizer": tokenizer , "model": model }
 
@@ -111,6 +112,8 @@ def generate():
 
     if model_set is None:
         return {"error": "Model does not exist"}
+
+    print(model_set)
 
     # First time messaging
     if token not in history_list:
