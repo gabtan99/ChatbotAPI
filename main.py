@@ -62,6 +62,8 @@ def kill_token(token):
 
 
 def generate_response(tokenizer, model, chat_round, context, query, token, parameters):
+
+   
     
     new_input_ids = tokenizer.encode(query + tokenizer.eos_token, return_tensors='pt')
 
@@ -82,27 +84,27 @@ def generate_response(tokenizer, model, chat_round, context, query, token, param
 
     bot_input_ids = torch.cat([chat_history_ids, new_input_ids], dim=-1) if chat_round > 0 else new_input_ids
     
-    chat_history_ids = model.generate(bot_input_ids, pad_token_id=tokenizer.eos_token_id, 
-                                        max_length=parameters["max_length"],  
-                                        do_sample=parameters["do_sample"], 
-                                        top_k=parameters["top_k"], 
-                                        top_p=parameters["top_p"], 
-                                        temperature=parameters["temperature"],  
-                                        repetition_penalty=parameters["repetition_penalty"] 
-                                        )
-
-    bot_output_ids = chat_history_ids[:, bot_input_ids.shape[-1]:]
+    all_chat_ids = model.generate(bot_input_ids, pad_token_id=tokenizer.eos_token_id, 
+                                                max_length=parameters["max_length"],
+                                                do_sample=parameters["do_sample"],
+                                                top_k=parameters["top_k"],
+                                                top_p=parameters["top_p"],
+                                                temperature=parameters["temperature"],
+                                                repetition_penalty=parameters["repetition_penalty"]
+                                                )
+    
+    bot_output_ids = all_chat_ids[:, bot_input_ids.shape[-1]:]
 
     q.append(bot_output_ids) # add bot reply to q
 
-    reply = tokenizer.decode(bot_output_ids[0], skip_special_tokens=True)    
+    reply = tokenizer.decode(all_chat_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)    
 
     history_list[token] = ({"context": q, "chat_round": chat_round + 1}) # store in memory to remember context
 
     if chat_round > 0:    
-        return {"response": reply, "chat_round": chat_round + 1}
+        return {"response": reply, "chat_round": chat_round + 1, "parameters": parameters}
     else:
-        return {"response": reply, "token": token}
+        return {"response": reply, "token": token, "parameters": parameters}
 
 @app.route("/generate", methods=["GET"])
 def generate():
@@ -110,21 +112,21 @@ def generate():
     # required
     query = request.args.get('query')
     token = request.args.get('token')
-    model_id = request.args.get('model_id')
+    model_id = int(request.args.get('model_id'))
 
     # sampling parameters
     parameters = {}
-    parameters["max_length"] = request.args.get("max_length", default=1000)
-    parameters["do_sample"] = request.args.get("do_sample", default=False)
-    parameters["top_k"] = request.args.get("top_k", default=50)
-    parameters["top_p"] = request.args.get("top_p", default=1)
-    parameters["temperature"] = request.args.get("temperature", default=1.0)
-    parameters["repetition_penalty"]  = request.args.get("repetition_penalty ", default=1.0)
+    parameters["max_length"] = int(request.args.get("max_length", default=1000))
+    parameters["do_sample"] = bool(request.args.get("do_sample", default=False))
+    parameters["top_k"] = int(request.args.get("top_k", default=50))
+    parameters["top_p"] = int(request.args.get("top_p", default=1))
+    parameters["temperature"] = float(request.args.get("temperature", default=1.0))
+    parameters["repetition_penalty"]  = float(request.args.get("repetition_penalty ", default=1.0))
 
     if query is None or model_id is None:
         return {"error": "query or model_id parameter missing"}
 
-    model_set = MODEL_LIST.get(int(model_id))    
+    model_set = MODEL_LIST.get(model_id)  
 
     if model_set is None:
         return {"error": "Model does not exist"}
