@@ -2,12 +2,11 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sslify import SSLify
 
-
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from torch import torch
 from datetime import datetime
 from collections import deque
 from dotenv import load_dotenv
-from torch import torch
 
 import threading
 import psycopg2
@@ -50,7 +49,6 @@ for i in all_models:
     if i[2] == '' or i[2] is None:
         tokenizer = AutoTokenizer.from_pretrained(i[3])
         model = AutoModelForCausalLM.from_pretrained(i[4])
-        print(i)
 
     MODEL_LIST[i[0]] = {"name": i[1], "tokenizer": tokenizer , "model": model }
 
@@ -60,19 +58,20 @@ def kill_token(token):
         del history_list[token]
         print("A Token Expired")
     except(Exception, KeyError) as error:
-        print("Key does not exist anymore")
+        print("Token does not exist anymore")
 
 
-def generate_response(tokenizer, model, chat_round, context, query, token):
+def generate_response(tokenizer, model, chat_round, context, query, token, parameters):
     
     new_input_ids = tokenizer.encode(query + tokenizer.eos_token, return_tensors='pt')
 
     if token is None: # first time messaging
         print("- REGISTERING TOKEN -")
-        q = deque(maxlen=3) 
+        q = deque(maxlen=4) 
 
         token = str(datetime.now().strftime("%Y%m%d%H%M%S"))
         threading.Timer(300.0, kill_token, [token]).start() # This will clear the memory for token
+
     else: # reuse previous n lines of context
         print("- ACCESSING TOKEN -")
         q = context
@@ -83,13 +82,20 @@ def generate_response(tokenizer, model, chat_round, context, query, token):
 
     bot_input_ids = torch.cat([chat_history_ids, new_input_ids], dim=-1) if chat_round > 0 else new_input_ids
     
-    chat_history_ids = model.generate(bot_input_ids, max_length=1250, pad_token_id=tokenizer.eos_token_id, do_sample=True, top_k=0, temperature=0.7)
+    chat_history_ids = model.generate(bot_input_ids, pad_token_id=tokenizer.eos_token_id, 
+                                        max_length=parameters["max_length"],  
+                                        do_sample=parameters["do_sample"], 
+                                        top_k=parameters["top_k"], 
+                                        top_p=parameters["top_p"], 
+                                        temperature=parameters["temperature"],  
+                                        repetition_penalty=parameters["repetition_penalty"] 
+                                        )
 
     bot_output_ids = chat_history_ids[:, bot_input_ids.shape[-1]:]
 
     q.append(bot_output_ids) # add bot reply to q
 
-    reply = tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)    
+    reply = tokenizer.decode(bot_output_ids[0], skip_special_tokens=True)    
 
     history_list[token] = ({"context": q, "chat_round": chat_round + 1}) # store in memory to remember context
 
@@ -101,9 +107,19 @@ def generate_response(tokenizer, model, chat_round, context, query, token):
 @app.route("/generate", methods=["GET"])
 def generate():
 
+    # required
     query = request.args.get('query')
     token = request.args.get('token')
     model_id = request.args.get('model_id')
+
+    # sampling parameters
+    parameters = {}
+    parameters["max_length"] = request.args.get("max_length", default=1000)
+    parameters["do_sample"] = request.args.get("do_sample", default=False)
+    parameters["top_k"] = request.args.get("top_k", default=50)
+    parameters["top_p"] = request.args.get("top_p", default=1)
+    parameters["temperature"] = request.args.get("temperature", default=1.0)
+    parameters["repetition_penalty"]  = request.args.get("repetition_penalty ", default=1.0)
 
     if query is None or model_id is None:
         return {"error": "query or model_id parameter missing"}
@@ -113,14 +129,12 @@ def generate():
     if model_set is None:
         return {"error": "Model does not exist"}
 
-    print(model_set)
-
     # First time messaging
     if token not in history_list:
-        return generate_response(model_set["tokenizer"], model_set["model"], 0, None, query, None)
+        return generate_response(model_set["tokenizer"], model_set["model"], 0, None, query, None, parameters)
     else:
         history = history_list.get(token)
-        return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["context"], query, token)
+        return generate_response(model_set["tokenizer"], model_set["model"], history["chat_round"],  history["context"], query, token, parameters)
 
 
 @app.route("/get_models", methods=["GET"])
