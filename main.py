@@ -9,6 +9,8 @@ from collections import deque
 from dotenv import load_dotenv
 
 import threading
+import gdown
+from zipfile import ZipFile
 import psycopg2
 import os
 
@@ -46,9 +48,20 @@ all_models = cursor.fetchall()
 
 for i in all_models:
 
-    if i[2] == '' or i[2] is None:
-        tokenizer = AutoTokenizer.from_pretrained(i[3])
-        model = AutoModelForCausalLM.from_pretrained(i[4])
+    model_dir = ""
+
+    if i[2] != '' and i[2] is not None:
+        url =  i[2]
+        output = str(i[3]) + '.zip'
+        gdown.download(url, output, quiet=False)
+
+        with ZipFile(output, 'r') as zipObj:
+            zipObj.extractall()
+
+        model_dir = "content/"
+    
+    tokenizer = AutoTokenizer.from_pretrained(model_dir + i[3])
+    model = AutoModelForCausalLM.from_pretrained(model_dir + i[4])
 
     MODEL_LIST[i[0]] = {"name": i[1], "tokenizer": tokenizer , "model": model }
 
@@ -63,13 +76,12 @@ def kill_token(token):
 
 def generate_response(tokenizer, model, chat_round, context, query, token, parameters):
 
-   
-    
     new_input_ids = tokenizer.encode(query + tokenizer.eos_token, return_tensors='pt')
 
     if token is None: # first time messaging
         print("- REGISTERING TOKEN -")
         q = deque(maxlen=4) 
+        q.append(new_input_ids)
 
         token = str(datetime.now().strftime("%Y%m%d%H%M%S"))
         threading.Timer(300.0, kill_token, [token]).start() # This will clear the memory for token
@@ -78,11 +90,10 @@ def generate_response(tokenizer, model, chat_round, context, query, token, param
         print("- ACCESSING TOKEN -")
         q = context
 
+        q.append(new_input_ids)
         chat_history_ids = torch.cat([line for line in q], dim=-1)
 
-    q.append(new_input_ids) # add user input to q
-
-    bot_input_ids = torch.cat([chat_history_ids, new_input_ids], dim=-1) if chat_round > 0 else new_input_ids
+    bot_input_ids = chat_history_ids if chat_round > 0 else new_input_ids
     
     all_chat_ids = model.generate(bot_input_ids, pad_token_id=tokenizer.eos_token_id, 
                                                 max_length=parameters["max_length"],

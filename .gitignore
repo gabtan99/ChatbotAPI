@@ -130,3 +130,7 @@ dmypy.json
 
 .deta
 database.ini
+models/
+content/
+
+*.zip
