@@ -66,8 +66,6 @@ for i in all_models:
 
     MODEL_LIST[i[0]] = {"name": i[1], "tokenizer": tokenizer , "model": model }
 
-    break
-
 def kill_token(token):
     try:
         del history_list[token]
