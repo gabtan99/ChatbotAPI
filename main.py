@@ -20,6 +20,7 @@ sslify = SSLify(app)
 
 load_dotenv() 
 
+
 history_list = {}
 MODEL_LIST = {}
 
@@ -65,6 +66,7 @@ for i in all_models:
 
     MODEL_LIST[i[0]] = {"name": i[1], "tokenizer": tokenizer , "model": model }
 
+    break
 
 def kill_token(token):
     try:
@@ -84,7 +86,7 @@ def generate_response(tokenizer, model, chat_round, context, query, token, param
         q.append(new_input_ids)
 
         token = str(datetime.now().strftime("%Y%m%d%H%M%S"))
-        threading.Timer(300.0, kill_token, [token]).start() # This will clear the memory for token
+        threading.Timer(600.0, kill_token, [token]).start() # This will clear the memory for token
 
     else: # reuse previous n lines of context
         print("- ACCESSING TOKEN -")
@@ -166,13 +168,10 @@ def submit_rating():
     conversation = request.args.get('conversation')
     rating = request.args.get('rating')
     model_id = request.args.get('model_id')
-    token = request.args.get('token')
 
     if conversation is None or rating is None or model_id is None:
         return {"error": "model_id, rating, and conversation parameter is required"}
     
-    if token is not None:
-        kill_token(token)
 
     try:
         print("- SUBMITTING RATING -")
